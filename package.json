@@ -1,17 +1,23 @@
 {
   "name": "foodlab",
-  "version": "0.1.0",
+  "version": "0.2.0-rc.1",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack --hostname 0.0.0.0",
-    "build": "next build --webpack",
-    "start": "next start --hostname 0.0.0.0",
+    "build": "next build --webpack && node scripts/prepare-standalone.mjs",
+    "start": "node scripts/start-app.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "supabase:start": "bash scripts/start-supabase.sh",
     "supabase:backup": "bash scripts/backup-supabase.sh",
-    "test:cloud": "node scripts/test-cloud.mjs"
+    "test:cloud": "node scripts/test-cloud.mjs",
+    "prices:worker": "node --env-file=.env.local scripts/price-worker.mjs",
+    "supabase:staging": "bash scripts/start-staging.sh",
+    "supabase:verify-backup": "node scripts/verify-backup.mjs",
+    "release:save": "node scripts/releases/save.mjs",
+    "release:run": "node scripts/releases/run.mjs",
+    "release:switch": "node scripts/releases/switch.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.80.0",
@@ -19,6 +25,7 @@
     "next": "^16.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "undici": "^8.12.3",
     "zod": "^4.1.0"
   },
   "devDependencies": {

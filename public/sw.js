@@ -8,3 +8,4 @@ self.addEventListener('fetch',event=>{
  if(event.request.mode==='navigate'&&url.pathname==='/'&&!url.search&&!url.hash){event.respondWith(fetch(event.request).then(response=>{if(response.ok){const copy=response.clone();event.waitUntil(caches.open(CACHE).then(cache=>cache.put('/',copy)));}return response;}).catch(()=>caches.match('/')));}
  else if(url.pathname.startsWith('/_next/static/')){event.respondWith(caches.match(event.request).then(cached=>cached||fetch(event.request).then(response=>{if(response.ok){const copy=response.clone();event.waitUntil(caches.open(CACHE).then(cache=>cache.put(event.request,copy)));}return response;})));}
 });
+self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING')void self.skipWaiting();});

@@ -1,4 +1,4 @@
-name: foodlab-supabase
+name: ${FOODLAB_STACK_NAME:-foodlab-supabase}
 services:
   db:
     image: supabase/postgres:17.6.1.136
@@ -26,7 +26,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - '127.0.0.1:54331:9999'
+      - '127.0.0.1:${FOODLAB_AUTH_PORT:-54331}:9999'
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -61,7 +61,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - '127.0.0.1:54332:3000'
+      - '127.0.0.1:${FOODLAB_REST_PORT:-54332}:3000'
     volumes:
       - ./rest-health.conf:/etc/foodlab-health.conf:ro
     environment:

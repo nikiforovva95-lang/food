@@ -1,21 +1,390 @@
-import {catalog} from './catalog';
-import type {FoodState,Feedback,Ingredient,Meal,Nutrition,Profile,Recipe,ShoppingItem} from './types';
-export const emptyFeedback:Feedback={rating:0,reaction:'',favorite:false,cooked:false,reasons:[],notes:''};
-export const defaultProfile:Profile={name:'Виталий',goal:'Сбалансированное питание',kcal:2200,protein:150,fat:75,carbs:230,mealProtein:45,weeklyServings:12,noPork:true,dislikes:'',allergens:'',spices:'Паприка, кумин, сумах, тимьян',budget:5000,maxMinutes:45,difficulty:'Любая',defaultServings:2,equipment:['Tefal Cook4me Touch CY912832','Tefal Dual Easy Fry & Grill EY905D10','Индукционная плита Hansa','Духовка Hansa','Сковорода 26 см','Без нагрева']};
-export function initialState():FoodState {return {version:1,profile:{...defaultProfile,equipment:[...defaultProfile.equipment]},feedback:{},recipes:[],hidden:[],plan:[],consumed:[],pantry:[],shopping:[]};}
-export function allRecipes(s:FoodState) {return [...catalog.filter(r=>!s.recipes.some(x=>x.id===r.id)),...s.recipes].filter(r=>!s.hidden.includes(r.id));}
-export function nutrition(r:Recipe):Nutrition {return r.ingredients.reduce((n,i)=>{const f=i.amount*i.gramsPerUnit/100;return {kcal:n.kcal+i.nutrition.kcal*f,protein:n.protein+i.nutrition.protein*f,fat:n.fat+i.nutrition.fat*f,carbs:n.carbs+i.nutrition.carbs*f};},{kcal:0,protein:0,fat:0,carbs:0});}
-export function multiply(n:Nutrition,f:number):Nutrition {return {kcal:n.kcal*f,protein:n.protein*f,fat:n.fat*f,carbs:n.carbs*f};}
-export function portion(r:Recipe){return multiply(nutrition(r),1/r.servings);}
-export function scaleRecipe(r:Recipe,servings:number):Recipe {if(!Number.isFinite(servings)||servings<=0)throw Error('Количество порций должно быть положительным');const f=servings/r.servings;return {...r,servings,yield:r.yield*f,cost:r.cost*f,ingredients:r.ingredients.map(i=>({...i,amount:i.amount*f}))};}
-export function sumMeals(meals:Meal[],recipes:Recipe[]):Nutrition {return meals.reduce((sum,m)=>{const r=recipes.find(r=>r.id===m.recipeId);if(!r)return sum;const n=multiply(portion(r),m.servings);return {kcal:sum.kcal+n.kcal,protein:sum.protein+n.protein,fat:sum.fat+n.fat,carbs:sum.carbs+n.carbs};},{kcal:0,protein:0,fat:0,carbs:0});}
-const tokens=(s:string)=>s.toLocaleLowerCase('ru').split(/[,;\n]+/).map(x=>x.trim()).filter(Boolean);
-export function eligible(r:Recipe,p:Profile){return r.minutes<=p.maxMinutes&&(!p.noPork||!r.ingredients.some(i=>/свин|бекон/i.test(i.name)))&&!tokens(p.dislikes).some(x=>r.ingredients.some(i=>i.name.toLowerCase().includes(x)))&&!tokens(p.allergens).some(x=>[...r.allergens,...r.ingredients.map(i=>i.name)].some(a=>a.toLowerCase().includes(x)))&&(p.difficulty==='Любая'||r.difficulty===p.difficulty)&&p.equipment.includes(r.equipment);}
-export function recommend(s:FoodState,recipes=allRecipes(s)){const rated=recipes.filter(r=>(s.feedback[r.id]?.rating??0)>=7||s.feedback[r.id]?.reaction==='like');return recipes.filter(r=>eligible(r,s.profile)&&s.feedback[r.id]?.reaction!=='dislike').map(r=>{const f=s.feedback[r.id]??emptyFeedback;const p=portion(r);const available=r.ingredients.filter(i=>s.pantry.some(x=>x.name.toLowerCase()===i.name.toLowerCase()&&x.unit===i.unit&&x.amount>=i.amount/r.servings&&(!x.expires||x.expires>=dateKey(new Date())))).length;const affinity=rated.filter(x=>x.id!==r.id&&x.proteinGroup===r.proteinGroup).length;const disliked=recipes.filter(x=>x.id!==r.id&&x.proteinGroup===r.proteinGroup&&((s.feedback[x.id]?.rating??0)>0&&(s.feedback[x.id]?.rating??0)<=4||s.feedback[x.id]?.reaction==='dislike')).length;const spiceMatch=tokens(s.profile.spices).some(x=>r.ingredients.some(i=>i.name.toLowerCase().includes(x)));const proteinFit=Math.abs(p.protein-s.profile.mealProtein)<=8;const reasons=[...(proteinFit?['Близко к вашей цели по белку']:[]),...(available?[`${available} продуктов уже дома`]:[]),...(affinity?['Похожий состав вам понравился']:[]),...(spiceMatch?['Есть любимые специи']:[]),...(r.minutes<=25?['Быстро приготовить']:[])];return {recipe:r,score:(proteinFit?15:0)+available*4+affinity*3-disliked*4+(spiceMatch?3:0)+(f.rating?(f.rating-5)*4:0)+(f.favorite?12:0)+(f.reaction==='try'?8:0)-(f.cooked?4:0),reason:reasons.join(' · ')||'Подходит по времени, технике и ограничениям'};}).sort((a,b)=>b.score-a.score);}
-export function dateKey(d:Date){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
-export function weekDays(offset=0){const d=new Date();d.setHours(12,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7)+offset*7);return Array.from({length:7},(_,i)=>{const x=new Date(d);x.setDate(x.getDate()+i);return dateKey(x);});}
-export function generateWeek(s:FoodState,days:string[]):{meals:Meal[];warnings:string[]} {const ranked=recommend(s);if(!ranked.length)return {meals:[],warnings:['Нет рецептов под текущие ограничения. Измените фильтры профиля или добавьте рецепт.']};const used:Record<string,number>={};const group:Record<string,number>={};const meals:Meal[]=[];let spend=0;for(let i=0;i<s.profile.weeklyServings;i++){const day=days[Math.floor(i/2)%7];const slot=i%2?'Ужин':'Обед';const choices=ranked.map(x=>({...x,value:x.score-(used[x.recipe.id]??0)*35-(group[x.recipe.proteinGroup]??0)*5-Math.abs(portion(x.recipe).kcal-s.profile.kcal*0.3)/30})).sort((a,b)=>b.value-a.value);const affordable=choices.filter(x=>spend+x.recipe.cost/x.recipe.servings<=s.profile.budget);const r=(affordable[0]??choices[0]).recipe;used[r.id]=(used[r.id]??0)+1;group[r.proteinGroup]=(group[r.proteinGroup]??0)+1;spend+=r.cost/r.servings;const existing=meals.find(m=>m.date===day&&m.slot===slot&&m.recipeId===r.id);if(existing)existing.servings++;else meals.push({id:crypto.randomUUID(),date:day,slot,recipeId:r.id,servings:1});}return {meals,warnings:[...(spend>s.profile.budget?['Оценка стоимости выше бюджета. Цены упаковок и доставка не учтены.']:[]),'План включает основные приёмы пищи, а не весь суточный рацион. Для заготовок объединяйте порции одного блюда; порции на конец недели заморозьте.']};}
-export function shoppingFor(meals:Meal[],recipes:Recipe[],pantry:FoodState['pantry']):ShoppingItem[]{const items=new Map<string,ShoppingItem>();for(const m of meals){const r=recipes.find(r=>r.id===m.recipeId);if(!r)continue;for(const i of r.ingredients){if(i.id==='water')continue;const key=`${i.name.trim().toLowerCase()}|${i.unit}`;const amount=i.amount*m.servings/r.servings;const old=items.get(key);items.set(key,{id:key,name:i.name,unit:i.unit,category:i.category,amount:(old?.amount??0)+amount,checked:false});}}return [...items.values()].map(i=>({...i,amount:Math.max(0,i.amount-pantry.filter(p=>p.name.trim().toLowerCase()===i.name.toLowerCase()&&p.unit===i.unit&&(!p.expires||p.expires>=dateKey(new Date()))).reduce((n,p)=>n+p.amount,0))})).filter(i=>i.amount>0.001);}
-export function shoppingFromRecipe(r:Recipe,servings:number,s:FoodState){return shoppingFor([{id:'one',date:'',slot:'',recipeId:r.id,servings}], [r],s.pantry);}
-export function format(n:number){return new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1}).format(n);}
-export function newIngredient():Ingredient{return {id:crypto.randomUUID(),name:'Новый продукт',amount:100,unit:'г',gramsPerUnit:1,category:'Другое',nutrition:{kcal:0,protein:0,fat:0,carbs:0},source:'Введите данные с этикетки на 100 г'};}
+import { catalog } from "./catalog";
+import type {
+  FoodState,
+  Feedback,
+  Ingredient,
+  Meal,
+  Nutrition,
+  Profile,
+  Recipe,
+  ShoppingItem,
+} from "./types";
+export const emptyFeedback: Feedback = {
+  rating: 0,
+  reaction: "",
+  favorite: false,
+  cooked: false,
+  reasons: [],
+  notes: "",
+};
+export const defaultProfile: Profile = {
+  name: "Виталий",
+  goal: "Сбалансированное питание",
+  kcal: 2200,
+  protein: 150,
+  fat: (2200 * 0.3) / 9,
+  carbs: 235,
+  mealProtein: 45,
+  weeklyServings: 12,
+  noPork: true,
+  dislikes: "",
+  allergens: "",
+  spices: "Паприка, кумин, сумах, тимьян",
+  budget: 5000,
+  maxMinutes: 45,
+  difficulty: "Любая",
+  defaultServings: 2,
+  fatMode: "auto",
+  fatShare: 30,
+  plateLimit: 450,
+  novelty: "balanced",
+  equipment: [
+    "Tefal Cook4me Touch CY912832",
+    "Tefal Dual Easy Fry & Grill EY905D10",
+    "Индукционная плита Hansa",
+    "Духовка Hansa",
+    "Сковорода 26 см",
+    "Без нагрева",
+  ],
+};
+export function initialState(): FoodState {
+  return {
+    version: 2,
+    profile: { ...defaultProfile, equipment: [...defaultProfile.equipment] },
+    feedback: {},
+    recipes: [],
+    hidden: [],
+    plan: [],
+    consumed: [],
+    pantry: [],
+    shopping: [],
+    wizard: null,
+    menuHistory: [],
+    recipeHistory: [],
+    priceQuotes: [],
+    shoppingSettings: {
+      city: "Краснодар",
+      location: "",
+      stores: ["Магнит", "Пятёрочка", "Лента", "Перекрёсток"],
+      mode: "one-store",
+      delivery: 0,
+      maxStores: 2,
+      chosenStores: [],
+      loyaltyStores: [],
+    },
+    stockEvents: [],
+  };
+}
+export function allRecipes(s: FoodState) {
+  return [
+    ...catalog.filter((r) => !s.recipes.some((x) => x.id === r.id)),
+    ...s.recipes,
+  ].filter((r) => !s.hidden.includes(r.id));
+}
+export function nutrition(r: Recipe): Nutrition {
+  return r.ingredients.reduce(
+    (n, i) => {
+      const f = (i.amount * i.gramsPerUnit) / 100;
+      return {
+        kcal: n.kcal + i.nutrition.kcal * f,
+        protein: n.protein + i.nutrition.protein * f,
+        fat: n.fat + i.nutrition.fat * f,
+        carbs: n.carbs + i.nutrition.carbs * f,
+      };
+    },
+    { kcal: 0, protein: 0, fat: 0, carbs: 0 },
+  );
+}
+export function multiply(n: Nutrition, f: number): Nutrition {
+  return {
+    kcal: n.kcal * f,
+    protein: n.protein * f,
+    fat: n.fat * f,
+    carbs: n.carbs * f,
+  };
+}
+export function portion(r: Recipe) {
+  return multiply(nutrition(r), 1 / r.servings);
+}
+export function scaleRecipe(r: Recipe, servings: number): Recipe {
+  if (!Number.isFinite(servings) || servings <= 0)
+    throw Error("Количество порций должно быть положительным");
+  const f = servings / r.servings;
+  return {
+    ...r,
+    servings,
+    yield: r.yield * f,
+    yieldMeasured: r.yieldMeasured && f === 1,
+    cost: r.cost * f,
+    steps: r.steps.map((step) =>
+      step.replace(
+        /(\d+(?:[.,]\d+)?)\s*(г|мл|л|штук)(?=\s|[.,;)])/g,
+        (_, amount, unit) =>
+          `${format(Number(amount.replace(",", ".")) * f)} ${unit}`,
+      ),
+    ),
+    ingredients: r.ingredients.map((i) => ({ ...i, amount: i.amount * f })),
+  };
+}
+export function sumMeals(meals: Meal[], recipes: Recipe[]): Nutrition {
+  return meals.reduce(
+    (sum, m) => {
+      const r = m.recipeSnapshot ?? recipes.find((r) => r.id === m.recipeId);
+      if (!r) return sum;
+      const n = multiply(portion(r), m.servings);
+      return {
+        kcal: sum.kcal + n.kcal,
+        protein: sum.protein + n.protein,
+        fat: sum.fat + n.fat,
+        carbs: sum.carbs + n.carbs,
+      };
+    },
+    { kcal: 0, protein: 0, fat: 0, carbs: 0 },
+  );
+}
+const tokens = (s: string) =>
+  s
+    .toLocaleLowerCase("ru")
+    .split(/[,;\n]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+export function eligible(r: Recipe, p: Profile) {
+  return (
+    r.minutes <= p.maxMinutes &&
+    (!p.noPork || !r.ingredients.some((i) => /свин|бекон/i.test(i.name))) &&
+    !tokens(p.dislikes).some((x) =>
+      r.ingredients.some((i) => i.name.toLowerCase().includes(x)),
+    ) &&
+    !tokens(p.allergens).some((x) =>
+      [...r.allergens, ...r.ingredients.map((i) => i.name)].some((a) =>
+        a.toLowerCase().includes(x),
+      ),
+    ) &&
+    (p.difficulty === "Любая" || r.difficulty === p.difficulty) &&
+    p.equipment.includes(r.equipment)
+  );
+}
+export function recommend(s: FoodState, recipes = allRecipes(s)) {
+  const rated = recipes.filter(
+    (r) =>
+      (s.feedback[r.id]?.rating ?? 0) >= 7 ||
+      s.feedback[r.id]?.reaction === "like",
+  );
+  return recipes
+    .filter(
+      (r) => eligible(r, s.profile) && s.feedback[r.id]?.reaction !== "dislike",
+    )
+    .map((r) => {
+      const f = s.feedback[r.id] ?? emptyFeedback;
+      const p = portion(r);
+      const available = r.ingredients.filter((i) =>
+        s.pantry.some(
+          (x) =>
+            x.name.toLowerCase() === i.name.toLowerCase() &&
+            x.unit === i.unit &&
+            x.amount >= i.amount / r.servings &&
+            (!x.expires || x.expires >= dateKey(new Date())),
+        ),
+      ).length;
+      const affinity = rated.filter(
+        (x) => x.id !== r.id && x.proteinGroup === r.proteinGroup,
+      ).length;
+      const disliked = recipes.filter(
+        (x) =>
+          x.id !== r.id &&
+          x.proteinGroup === r.proteinGroup &&
+          (((s.feedback[x.id]?.rating ?? 0) > 0 &&
+            (s.feedback[x.id]?.rating ?? 0) <= 4) ||
+            s.feedback[x.id]?.reaction === "dislike"),
+      ).length;
+      const spiceMatch = tokens(s.profile.spices).some((x) =>
+        r.ingredients.some((i) => i.name.toLowerCase().includes(x)),
+      );
+      let taste = 0;
+      const spiceIds = new Set(
+        r.ingredients.filter((i) => i.category === "Специи").map((i) => i.id),
+      );
+      for (const other of recipes) {
+        const f = s.feedback[other.id];
+        if (!f) continue;
+        const sign =
+          f.rating >= 7 || f.reaction === "like"
+            ? 1
+            : (f.rating > 0 && f.rating <= 4) || f.reaction === "dislike"
+              ? -1
+              : 0;
+        if (!sign) continue;
+        if (f.reasons.includes("Специи"))
+          taste +=
+            other.ingredients.filter((i) => spiceIds.has(i.id)).length *
+            sign *
+            2;
+        if (f.reasons.includes("Время") && r.minutes >= other.minutes)
+          taste += sign * 2;
+        if (f.reasons.includes("Сложность") && r.equipment === other.equipment)
+          taste += sign * 2;
+      }
+      const proteinFit = Math.abs(p.protein - s.profile.mealProtein) <= 8;
+      const reasons = [
+        ...(proteinFit ? ["Близко к вашей цели по белку"] : []),
+        ...(available ? [`${available} продуктов уже дома`] : []),
+        ...(affinity ? ["Похожий состав вам понравился"] : []),
+        ...(spiceMatch ? ["Есть любимые специи"] : []),
+        ...(r.minutes <= 25 ? ["Быстро приготовить"] : []),
+      ];
+      return {
+        recipe: r,
+        score:
+          taste +
+          (proteinFit ? 15 : 0) +
+          available * 4 +
+          affinity * 3 -
+          disliked * 4 +
+          (spiceMatch ? 3 : 0) +
+          (f.rating ? (f.rating - 5) * 4 : 0) +
+          (f.favorite ? 12 : 0) +
+          (f.reaction === "try" ? 8 : 0) -
+          (f.cooked ? 4 : 0),
+        reason:
+          reasons.join(" · ") || "Подходит по времени, технике и ограничениям",
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+export function dateKey(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+export function weekDays(offset = 0) {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + offset * 7);
+  return Array.from({ length: 7 }, (_, i) => {
+    const x = new Date(d);
+    x.setDate(x.getDate() + i);
+    return dateKey(x);
+  });
+}
+export function generateWeek(
+  s: FoodState,
+  days: string[],
+): { meals: Meal[]; warnings: string[] } {
+  const ranked = recommend(s);
+  if (!ranked.length)
+    return {
+      meals: [],
+      warnings: [
+        "Нет рецептов под текущие ограничения. Измените фильтры профиля или добавьте рецепт.",
+      ],
+    };
+  const used: Record<string, number> = {};
+  const group: Record<string, number> = {};
+  const meals: Meal[] = [];
+  let spend = 0;
+  for (let i = 0; i < s.profile.weeklyServings; i++) {
+    const day = days[Math.floor(i / 2) % 7];
+    const slot = i % 2 ? "Ужин" : "Обед";
+    const choices = ranked
+      .map((x) => ({
+        ...x,
+        value:
+          x.score -
+          (used[x.recipe.id] ?? 0) * 35 -
+          (group[x.recipe.proteinGroup] ?? 0) * 5 -
+          Math.abs(portion(x.recipe).kcal - s.profile.kcal * 0.3) / 30,
+      }))
+      .sort((a, b) => b.value - a.value);
+    const affordable = choices.filter(
+      (x) => spend + x.recipe.cost / x.recipe.servings <= s.profile.budget,
+    );
+    const r = (affordable[0] ?? choices[0]).recipe;
+    used[r.id] = (used[r.id] ?? 0) + 1;
+    group[r.proteinGroup] = (group[r.proteinGroup] ?? 0) + 1;
+    spend += r.cost / r.servings;
+    const existing = meals.find(
+      (m) => m.date === day && m.slot === slot && m.recipeId === r.id,
+    );
+    if (existing) existing.servings++;
+    else
+      meals.push({
+        id: crypto.randomUUID(),
+        date: day,
+        slot,
+        recipeId: r.id,
+        servings: 1,
+      });
+  }
+  return {
+    meals,
+    warnings: [
+      ...(spend > s.profile.budget
+        ? ["Оценка стоимости выше бюджета. Цены упаковок и доставка не учтены."]
+        : []),
+      "План включает основные приёмы пищи, а не весь суточный рацион. Для заготовок объединяйте порции одного блюда; порции на конец недели заморозьте.",
+    ],
+  };
+}
+export function shoppingFor(
+  meals: Meal[],
+  recipes: Recipe[],
+  pantry: FoodState["pantry"],
+): ShoppingItem[] {
+  const items = new Map<string, ShoppingItem>();
+  for (const m of meals) {
+    const r = m.recipeSnapshot ?? recipes.find((r) => r.id === m.recipeId);
+    if (!r) continue;
+    for (const i of r.ingredients) {
+      if (i.id === "water") continue;
+      const key = `${i.name.trim().toLowerCase()}|${i.unit}`;
+      const amount = (i.amount * m.servings) / r.servings;
+      const old = items.get(key);
+      items.set(key, {
+        id: key,
+        name: i.name,
+        unit: i.unit,
+        category: i.category,
+        amount: (old?.amount ?? 0) + amount,
+        checked: false,
+      });
+    }
+  }
+  return [...items.values()]
+    .map((i) => ({
+      ...i,
+      id: crypto.randomUUID(),
+      amount: Math.max(
+        0,
+        i.amount -
+          pantry
+            .filter(
+              (p) =>
+                p.name.trim().toLowerCase() === i.name.toLowerCase() &&
+                p.unit === i.unit &&
+                (!p.expires || p.expires >= dateKey(new Date())),
+            )
+            .reduce((n, p) => n + p.amount, 0),
+      ),
+    }))
+    .filter((i) => i.amount > 0.001);
+}
+export function shoppingFromRecipe(r: Recipe, servings: number, s: FoodState) {
+  return shoppingFor(
+    [{ id: "one", date: "", slot: "", recipeId: r.id, servings }],
+    [r],
+    s.pantry,
+  );
+}
+export function format(n: number) {
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(n);
+}
+export function newIngredient(): Ingredient {
+  return {
+    id: crypto.randomUUID(),
+    name: "Новый продукт",
+    amount: 100,
+    unit: "г",
+    gramsPerUnit: 1,
+    category: "Другое",
+    nutrition: { kcal: 0, protein: 0, fat: 0, carbs: 0 },
+    source: "Введите данные с этикетки на 100 г",
+  };
+}

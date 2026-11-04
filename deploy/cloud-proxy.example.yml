@@ -1,0 +1,22 @@
+# Optional override only for the managed cloud's session proxy and CA.
+services:
+  app-stable:
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/proxy-ca.pem
+    volumes:
+      - ${CODEX_PROXY_CERT:?}:/run/proxy-ca.pem:ro
+  app-testing:
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/proxy-ca.pem
+    volumes:
+      - ${CODEX_PROXY_CERT:?}:/run/proxy-ca.pem:ro
+  prices-stable:
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/proxy-ca.pem
+    volumes:
+      - ${CODEX_PROXY_CERT:?}:/run/proxy-ca.pem:ro
+  prices-testing:
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/proxy-ca.pem
+    volumes:
+      - ${CODEX_PROXY_CERT:?}:/run/proxy-ca.pem:ro

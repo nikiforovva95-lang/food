@@ -1,0 +1,536 @@
+{
+  "name": "foodlab",
+  "services": {
+    "db-stable": {
+      "image": "supabase/postgres:17.6.1.136",
+      "restart": "unless-stopped",
+      "networks": [
+        "data-stable"
+      ],
+      "environment": {
+        "POSTGRES_PASSWORD": "${STABLE_DB_PASSWORD:?}",
+        "POSTGRES_DB": "postgres",
+        "POSTGRES_HOST": "/var/run/postgresql",
+        "PGPORT": 5432,
+        "JWT_EXP": 3600
+      },
+      "volumes": [
+        "stable-pgdata:/var/lib/postgresql/data",
+        "stable-pgconfig:/etc/postgresql-custom",
+        "../supabase/selfhost/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-foodlab-roles.sql:ro"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "postgres",
+          "-h",
+          "localhost"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 40
+      },
+      "command": [
+        "postgres",
+        "-c",
+        "config_file=/etc/postgresql/postgresql.conf",
+        "-c",
+        "log_min_messages=warning"
+      ]
+    },
+    "auth-stable": {
+      "image": "supabase/gotrue:v2.197.0",
+      "restart": "unless-stopped",
+      "networks": [
+        "data-stable"
+      ],
+      "depends_on": {
+        "db-stable": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "GOTRUE_API_HOST": "0.0.0.0",
+        "GOTRUE_API_PORT": 9999,
+        "API_EXTERNAL_URL": "https://${FOODLAB_DOMAIN}/supabase/auth/v1",
+        "GOTRUE_SITE_URL": "https://${FOODLAB_DOMAIN}",
+        "GOTRUE_DB_DRIVER": "postgres",
+        "GOTRUE_DB_DATABASE_URL": "postgres://supabase_auth_admin:${STABLE_DB_PASSWORD}@db-stable:5432/postgres",
+        "GOTRUE_JWT_SECRET": "${STABLE_JWT_SECRET}",
+        "GOTRUE_JWT_AUD": "authenticated",
+        "GOTRUE_JWT_ADMIN_ROLES": "service_role",
+        "GOTRUE_JWT_EXP": 3600,
+        "GOTRUE_DISABLE_SIGNUP": "false",
+        "GOTRUE_EXTERNAL_EMAIL_ENABLED": "true",
+        "GOTRUE_MAILER_AUTOCONFIRM": "true",
+        "GOTRUE_SECURITY_MIN_PASSWORD_LENGTH": 12,
+        "GOTRUE_LOG_LEVEL": "warn"
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "wget",
+          "-Y",
+          "off",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:9999/health"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 40
+      }
+    },
+    "rest-stable": {
+      "image": "postgrest/postgrest:v14.18",
+      "restart": "unless-stopped",
+      "networks": [
+        "data-stable"
+      ],
+      "depends_on": {
+        "db-stable": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "PGRST_DB_URI": "postgres://authenticator:${STABLE_DB_PASSWORD}@db-stable:5432/postgres",
+        "PGRST_DB_SCHEMAS": "public",
+        "PGRST_DB_ANON_ROLE": "anon",
+        "PGRST_JWT_SECRET": "${STABLE_JWT_SECRET}",
+        "PGRST_DB_USE_LEGACY_GUCS": "false",
+        "PGRST_DB_MAX_ROWS": 1000,
+        "PGRST_ADMIN_SERVER_PORT": 3001
+      },
+      "volumes": [
+        "../supabase/selfhost/rest-health.conf:/etc/foodlab-health.conf:ro"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "postgrest",
+          "/etc/foodlab-health.conf",
+          "--ready"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 40
+      }
+    },
+    "migrate-stable": {
+      "image": "supabase/postgres:17.6.1.136",
+      "networks": [
+        "data-stable"
+      ],
+      "depends_on": {
+        "auth-stable": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "PGHOST": "db-stable",
+        "PGUSER": "postgres",
+        "PGDATABASE": "postgres",
+        "PGPASSWORD": "${STABLE_DB_PASSWORD}"
+      },
+      "volumes": [
+        "./migrate.sh:/migrations/run.sh:ro",
+        "../supabase/schema.sql:/migrations/schema.sql:ro",
+        "../supabase/migrations:/migrations/changes:ro"
+      ],
+      "entrypoint": [
+        "sh",
+        "/migrations/run.sh"
+      ],
+      "restart": "no"
+    },
+    "app-stable": {
+      "build": {
+        "context": "${FOODLAB_STABLE_RELEASE:?}",
+        "dockerfile": "${FOODLAB_DOCKERFILE:?Set absolute path to deploy/Dockerfile.release}"
+      },
+      "restart": "unless-stopped",
+      "networks": [
+        "edge",
+        "data-stable"
+      ],
+      "depends_on": {
+        "migrate-stable": {
+          "condition": "service_completed_successfully"
+        },
+        "rest-stable": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "FOODLAB_SUPABASE_AUTH_URL": "http://auth-stable:9999",
+        "FOODLAB_SUPABASE_REST_URL": "http://rest-stable:3000",
+        "FOODLAB_PUBLIC_ANON_KEY": "${STABLE_ANON_KEY}",
+        "FOODLAB_RELEASE_CHANNEL": "stable",
+        "FOODLAB_RUNTIME": "/data/runtime",
+        "FOODLAB_AI_MODEL": "${FOODLAB_AI_MODEL:-gpt-4.1-mini}",
+        "FOODLAB_AI_KEY": "${FOODLAB_AI_KEY:-}",
+        "FOODLAB_PRICE_FEED_URL": "${FOODLAB_PRICE_FEED_URL:-}",
+        "FOODLAB_PRICE_FEED_TOKEN": "${FOODLAB_PRICE_FEED_TOKEN:-}"
+      },
+      "volumes": [
+        "stable-runtime:/data/runtime"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/config').then(r=>{if(!r.ok)process.exit(1)})"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "backup-stable": {
+      "image": "supabase/postgres:17.6.1.136",
+      "restart": "unless-stopped",
+      "networks": [
+        "data-stable"
+      ],
+      "depends_on": {
+        "migrate-stable": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "environment": {
+        "PGHOST": "db-stable",
+        "PGUSER": "postgres",
+        "PGDATABASE": "postgres",
+        "PGPASSWORD": "${STABLE_DB_PASSWORD}",
+        "FOODLAB_BACKUP_SECONDS": 86400
+      },
+      "volumes": [
+        "stable-backups:/backups",
+        "./backup-loop.sh:/backup-loop.sh:ro"
+      ],
+      "entrypoint": [
+        "sh",
+        "/backup-loop.sh"
+      ]
+    },
+    "prices-stable": {
+      "build": {
+        "context": "${FOODLAB_STABLE_RELEASE:?}",
+        "dockerfile": "${FOODLAB_DOCKERFILE:?Set absolute path to deploy/Dockerfile.release}"
+      },
+      "restart": "unless-stopped",
+      "profiles": [
+        "prices"
+      ],
+      "networks": [
+        "edge"
+      ],
+      "environment": {
+        "FOODLAB_RUNTIME": "/data/runtime",
+        "FOODLAB_PRICE_FEED_URL": "${FOODLAB_PRICE_FEED_URL:-}",
+        "FOODLAB_PRICE_FEED_TOKEN": "${FOODLAB_PRICE_FEED_TOKEN:-}"
+      },
+      "volumes": [
+        "stable-runtime:/data/runtime"
+      ],
+      "command": [
+        "node",
+        "scripts/price-worker.mjs"
+      ]
+    },
+    "db-testing": {
+      "image": "supabase/postgres:17.6.1.136",
+      "restart": "unless-stopped",
+      "networks": [
+        "data-testing"
+      ],
+      "environment": {
+        "POSTGRES_PASSWORD": "${TESTING_DB_PASSWORD:?}",
+        "POSTGRES_DB": "postgres",
+        "POSTGRES_HOST": "/var/run/postgresql",
+        "PGPORT": 5432,
+        "JWT_EXP": 3600
+      },
+      "volumes": [
+        "testing-pgdata:/var/lib/postgresql/data",
+        "testing-pgconfig:/etc/postgresql-custom",
+        "../supabase/selfhost/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-foodlab-roles.sql:ro"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "postgres",
+          "-h",
+          "localhost"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 40
+      },
+      "command": [
+        "postgres",
+        "-c",
+        "config_file=/etc/postgresql/postgresql.conf",
+        "-c",
+        "log_min_messages=warning"
+      ]
+    },
+    "auth-testing": {
+      "image": "supabase/gotrue:v2.197.0",
+      "restart": "unless-stopped",
+      "networks": [
+        "data-testing"
+      ],
+      "depends_on": {
+        "db-testing": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "GOTRUE_API_HOST": "0.0.0.0",
+        "GOTRUE_API_PORT": 9999,
+        "API_EXTERNAL_URL": "https://${FOODLAB_TEST_DOMAIN}/supabase/auth/v1",
+        "GOTRUE_SITE_URL": "https://${FOODLAB_TEST_DOMAIN}",
+        "GOTRUE_DB_DRIVER": "postgres",
+        "GOTRUE_DB_DATABASE_URL": "postgres://supabase_auth_admin:${TESTING_DB_PASSWORD}@db-testing:5432/postgres",
+        "GOTRUE_JWT_SECRET": "${TESTING_JWT_SECRET}",
+        "GOTRUE_JWT_AUD": "authenticated",
+        "GOTRUE_JWT_ADMIN_ROLES": "service_role",
+        "GOTRUE_JWT_EXP": 3600,
+        "GOTRUE_DISABLE_SIGNUP": "false",
+        "GOTRUE_EXTERNAL_EMAIL_ENABLED": "true",
+        "GOTRUE_MAILER_AUTOCONFIRM": "true",
+        "GOTRUE_SECURITY_MIN_PASSWORD_LENGTH": 12,
+        "GOTRUE_LOG_LEVEL": "warn"
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "wget",
+          "-Y",
+          "off",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:9999/health"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 40
+      }
+    },
+    "rest-testing": {
+      "image": "postgrest/postgrest:v14.18",
+      "restart": "unless-stopped",
+      "networks": [
+        "data-testing"
+      ],
+      "depends_on": {
+        "db-testing": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "PGRST_DB_URI": "postgres://authenticator:${TESTING_DB_PASSWORD}@db-testing:5432/postgres",
+        "PGRST_DB_SCHEMAS": "public",
+        "PGRST_DB_ANON_ROLE": "anon",
+        "PGRST_JWT_SECRET": "${TESTING_JWT_SECRET}",
+        "PGRST_DB_USE_LEGACY_GUCS": "false",
+        "PGRST_DB_MAX_ROWS": 1000,
+        "PGRST_ADMIN_SERVER_PORT": 3001
+      },
+      "volumes": [
+        "../supabase/selfhost/rest-health.conf:/etc/foodlab-health.conf:ro"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "postgrest",
+          "/etc/foodlab-health.conf",
+          "--ready"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 40
+      }
+    },
+    "migrate-testing": {
+      "image": "supabase/postgres:17.6.1.136",
+      "networks": [
+        "data-testing"
+      ],
+      "depends_on": {
+        "auth-testing": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "PGHOST": "db-testing",
+        "PGUSER": "postgres",
+        "PGDATABASE": "postgres",
+        "PGPASSWORD": "${TESTING_DB_PASSWORD}"
+      },
+      "volumes": [
+        "./migrate.sh:/migrations/run.sh:ro",
+        "../supabase/schema.sql:/migrations/schema.sql:ro",
+        "../supabase/migrations:/migrations/changes:ro"
+      ],
+      "entrypoint": [
+        "sh",
+        "/migrations/run.sh"
+      ],
+      "restart": "no"
+    },
+    "app-testing": {
+      "build": {
+        "context": "${FOODLAB_TESTING_RELEASE:?}",
+        "dockerfile": "${FOODLAB_DOCKERFILE:?Set absolute path to deploy/Dockerfile.release}"
+      },
+      "restart": "unless-stopped",
+      "networks": [
+        "edge",
+        "data-testing"
+      ],
+      "depends_on": {
+        "migrate-testing": {
+          "condition": "service_completed_successfully"
+        },
+        "rest-testing": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "FOODLAB_SUPABASE_AUTH_URL": "http://auth-testing:9999",
+        "FOODLAB_SUPABASE_REST_URL": "http://rest-testing:3000",
+        "FOODLAB_PUBLIC_ANON_KEY": "${TESTING_ANON_KEY}",
+        "FOODLAB_RELEASE_CHANNEL": "testing",
+        "FOODLAB_RUNTIME": "/data/runtime",
+        "FOODLAB_AI_MODEL": "${FOODLAB_AI_MODEL:-gpt-4.1-mini}",
+        "FOODLAB_AI_KEY": "${FOODLAB_AI_KEY:-}",
+        "FOODLAB_PRICE_FEED_URL": "${FOODLAB_PRICE_FEED_URL:-}",
+        "FOODLAB_PRICE_FEED_TOKEN": "${FOODLAB_PRICE_FEED_TOKEN:-}"
+      },
+      "volumes": [
+        "testing-runtime:/data/runtime"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/config').then(r=>{if(!r.ok)process.exit(1)})"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "backup-testing": {
+      "image": "supabase/postgres:17.6.1.136",
+      "restart": "unless-stopped",
+      "networks": [
+        "data-testing"
+      ],
+      "depends_on": {
+        "migrate-testing": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "environment": {
+        "PGHOST": "db-testing",
+        "PGUSER": "postgres",
+        "PGDATABASE": "postgres",
+        "PGPASSWORD": "${TESTING_DB_PASSWORD}",
+        "FOODLAB_BACKUP_SECONDS": 86400
+      },
+      "volumes": [
+        "testing-backups:/backups",
+        "./backup-loop.sh:/backup-loop.sh:ro"
+      ],
+      "entrypoint": [
+        "sh",
+        "/backup-loop.sh"
+      ]
+    },
+    "prices-testing": {
+      "build": {
+        "context": "${FOODLAB_TESTING_RELEASE:?}",
+        "dockerfile": "${FOODLAB_DOCKERFILE:?Set absolute path to deploy/Dockerfile.release}"
+      },
+      "restart": "unless-stopped",
+      "profiles": [
+        "prices"
+      ],
+      "networks": [
+        "edge"
+      ],
+      "environment": {
+        "FOODLAB_RUNTIME": "/data/runtime",
+        "FOODLAB_PRICE_FEED_URL": "${FOODLAB_PRICE_FEED_URL:-}",
+        "FOODLAB_PRICE_FEED_TOKEN": "${FOODLAB_PRICE_FEED_TOKEN:-}"
+      },
+      "volumes": [
+        "testing-runtime:/data/runtime"
+      ],
+      "command": [
+        "node",
+        "scripts/price-worker.mjs"
+      ]
+    },
+    "https": {
+      "image": "caddy:2.10.2",
+      "restart": "unless-stopped",
+      "networks": [
+        "edge"
+      ],
+      "ports": [
+        "80:80",
+        "443:443"
+      ],
+      "depends_on": {
+        "app-stable": {
+          "condition": "service_healthy"
+        },
+        "app-testing": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "FOODLAB_DOMAIN": "${FOODLAB_DOMAIN:?}",
+        "FOODLAB_TEST_DOMAIN": "${FOODLAB_TEST_DOMAIN:?}"
+      },
+      "volumes": [
+        "./Caddyfile:/etc/caddy/Caddyfile:ro",
+        "caddy-data:/data",
+        "caddy-config:/config"
+      ]
+    }
+  },
+  "networks": {
+    "edge": {},
+    "data-stable": {
+      "internal": true
+    },
+    "data-testing": {
+      "internal": true
+    }
+  },
+  "volumes": {
+    "stable-pgdata": {},
+    "stable-pgconfig": {},
+    "stable-runtime": {},
+    "stable-backups": {},
+    "testing-pgdata": {},
+    "testing-pgconfig": {},
+    "testing-runtime": {},
+    "testing-backups": {},
+    "caddy-data": {},
+    "caddy-config": {}
+  }
+}

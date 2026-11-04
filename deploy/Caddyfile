@@ -1,0 +1,8 @@
+{$FOODLAB_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy app-stable:3000
+}
+{$FOODLAB_TEST_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy app-testing:3000
+}
