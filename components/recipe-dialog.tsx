@@ -513,7 +513,7 @@ export function RecipeDialog({
               линейно. Потери жира неизвестны, в расчёте сохранены все
               ингредиенты.
             </p>
-            <div className="actions">
+            {!readOnly && (<div className="actions">
               <button
                 className="primary"
                 onClick={() => onShop(recipe, servings)}
@@ -538,7 +538,7 @@ export function RecipeDialog({
                   Изменить
                 </button>
               )}
-            </div>
+            </div>)}
             <h3>Как приготовить</h3>
             <p className="muted">
               {recipe.equipment} · время ориентировочное. Граммы указаны на

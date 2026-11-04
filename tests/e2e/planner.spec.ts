@@ -79,6 +79,7 @@ test("пошаговое меню, партии, история и реальн�
   await expect(
     dialog.getByRole("button", { name: "Изменить", exact: true }),
   ).toHaveCount(0);
+  await expect(dialog.getByRole("button",{name:"В меню",exact:true})).toHaveCount(0);
   await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
   await page
     .getByRole("button", { name: "Указать съеденный вес", exact: true })
