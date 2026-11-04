@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { readFile, writeFile, access } from "node:fs/promises";
+import { readFile, writeFile, access, readlink } from "node:fs/promises";
 import path from "node:path";
 const [id, channel = "testing"] = process.argv.slice(2);
 if (
@@ -103,7 +103,8 @@ for (let attempt = 0; attempt < 40; attempt++) {
     const r = await fetch("http://127.0.0.1:" + probePort + "/api/config", {
       signal: AbortSignal.timeout(1000),
     });
-    if (r.ok) {
+    const version=await fetch("http://127.0.0.1:"+probePort+"/api/releases",{signal:AbortSignal.timeout(1000)}).then(x=>x.json());
+    if (r.ok && version.commit===release.commit && probe.exitCode===null) {
       healthy = true;
       break;
     }
@@ -124,7 +125,8 @@ try {
 if (running) {
   try {
     const command = await readFile(`/proc/${running.pid}/cmdline`, "utf8");
-    if (!command.includes(path.join(base, running.id, "server.js")))
+    const cwd=await readlink(`/proc/${running.pid}/cwd`);
+    if (cwd!==path.join(base,running.id) || !(command.startsWith('next-server')||command.includes(path.join(base, running.id, "server.js"))))
       throw Error(
         "Saved PID does not match its release. Stop the intended server manually.",
       );

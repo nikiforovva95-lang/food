@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile, writeFile, mkdir, access } from "node:fs/promises";
 import path from "node:path";
+import { createServer } from "node:net";
 const [id, channel = "testing"] = process.argv.slice(2);
 if (
   !id ||
@@ -20,6 +21,11 @@ const port = channel === "stable" ? 3000 : 3001,
       ? "/workspace/food-runtime"
       : "/workspace/food-runtime-staging";
 const envFile = path.join(runtime, "app.env");
+await new Promise((resolve, reject) => {
+  const socket=createServer();
+  socket.once('error',()=>reject(Error(`Port ${port} is occupied; the running server and its release record were preserved.`)));
+  socket.listen(port,'0.0.0.0',()=>socket.close(resolve));
+});
 const serverEnv = {
   ...process.env,
   PORT: String(port),
@@ -41,6 +47,13 @@ const child = spawn(
   [`--env-file=${envFile}`, path.join(dir, "server.js")],
   { cwd: dir, stdio: "inherit", env: serverEnv },
 );
+let ready=false;
+for(let attempt=0;attempt<40;attempt++){
+  if(child.exitCode!==null)throw Error('Release exited before readiness; previous release record was preserved.');
+  try{const response=await fetch(`http://127.0.0.1:${port}/api/releases`,{signal:AbortSignal.timeout(1000)});const info=await response.json();if(response.ok&&info.commit===release.commit){ready=true;break;}}catch{}
+  await new Promise(resolve=>setTimeout(resolve,250));
+}
+if(!ready){child.kill('SIGTERM');throw Error('Release did not become ready; previous release record was preserved.');}
 await mkdir(base, { recursive: true, mode: 0o700 });
 await writeFile(
   path.join(base, `running-${port}.json`),
