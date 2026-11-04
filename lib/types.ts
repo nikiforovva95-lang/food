@@ -1,0 +1,10 @@
+export type Nutrition = { kcal:number; protein:number; fat:number; carbs:number };
+export type Unit = 'г'|'мл'|'шт';
+export type Ingredient = { id:string; name:string; amount:number; unit:Unit; gramsPerUnit:number; category:string; nutrition:Nutrition; source:string };
+export type Recipe = { id:string; name:string; description:string; category:string; proteinGroup:string; minutes:number; difficulty:'Легко'|'Средне'; equipment:string; cost:number; servings:number; yield:number; yieldMeasured:boolean; image:string; ingredients:Ingredient[]; steps:string[]; substitutions:string; tags:string[]; allergens:string[]; source:string };
+export type Feedback = { rating:number; reaction:''|'like'|'dislike'|'try'; favorite:boolean; cooked:boolean; reasons:string[]; notes:string };
+export type Profile = { name:string; goal:string; kcal:number; protein:number; fat:number; carbs:number; mealProtein:number; weeklyServings:number; noPork:boolean; dislikes:string; allergens:string; spices:string; budget:number; maxMinutes:number; difficulty:string; defaultServings:number; equipment:string[] };
+export type Meal = { id:string; date:string; slot:string; recipeId:string; servings:number };
+export type PantryItem = { id:string; name:string; amount:number; unit:Unit; expires:string };
+export type ShoppingItem = { id:string; name:string; amount:number; unit:Unit; category:string; checked:boolean };
+export type FoodState = { version:1; profile:Profile; feedback:Record<string,Feedback>; recipes:Recipe[]; hidden:string[]; plan:Meal[]; consumed:Meal[]; pantry:PantryItem[]; shopping:ShoppingItem[] };

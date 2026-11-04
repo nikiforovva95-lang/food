@@ -1,0 +1,28 @@
+import {describe,it,expect} from 'vitest';
+import {catalog,ingredient} from '../lib/catalog';
+import {allRecipes,eligible,generateWeek,initialState,multiply,nutrition,portion,recommend,scaleRecipe,shoppingFor,sumMeals} from '../lib/domain';
+import {recipeSchema,stateSchema} from '../lib/validation';
+import type {Meal,Recipe} from '../lib/types';
+const r=catalog[0];const meal=(recipeId=r.id,servings=1):Meal=>({id:crypto.randomUUID(),date:'2026-11-02',slot:'Обед',recipeId,servings});
+describe('Каталог и расчёты',()=>{
+ it('20 валидных разнообразных рецептов с источниками и всеми продуктами',()=>{expect(catalog).toHaveLength(20);for(const recipe of catalog){expect(recipeSchema.safeParse(recipe).success).toBe(true);expect(recipe.ingredients.every(i=>i.source.length>10)).toBe(true);expect(recipe.steps.length).toBeGreaterThanOrEqual(3);}expect(new Set(catalog.map(x=>x.proteinGroup)).size).toBeGreaterThan(5);});
+ it('суммирует КБЖУ сырого съедобного веса',()=>{const recipe={...r,ingredients:[ingredient('chicken',200),ingredient('oil',10)]};expect(nutrition(recipe).protein).toBeCloseTo(47.2);expect(nutrition(recipe).kcal).toBeCloseTo(314.4);});
+ it('масштабирует каждый ингредиент, выход и стоимость без изменения равной порции',()=>{const scaled=scaleRecipe(r,7);expect(scaled.ingredients[0].amount).toBe(r.ingredients[0].amount*3.5);expect(scaled.yield).toBe(r.yield*3.5);expect(scaled.cost).toBe(r.cost*3.5);expect(portion(scaled).kcal).toBeCloseTo(portion(r).kcal);});
+ it('фактический выход меняет КБЖУ на 100 г, не суммарные КБЖУ и порцию',()=>{const measured={...r,yield:r.yield/2,yieldMeasured:true};expect(nutrition(measured)).toEqual(nutrition(r));expect(portion(measured)).toEqual(portion(r));expect(multiply(nutrition(measured),100/measured.yield).kcal).toBeCloseTo(multiply(nutrition(r),100/r.yield).kcal*2);});
+ it('учитывает съедобную массу штук',()=>{const recipe={...r,ingredients:[{...ingredient('egg',2),unit:'шт' as const,gramsPerUnit:50}]};expect(nutrition(recipe).kcal).toBe(143);});
+ it('вода меняет только массу',()=>{expect(nutrition({...r,ingredients:[ingredient('water',1000)]})).toEqual({kcal:0,protein:0,fat:0,carbs:0});});
+ it('отвергает ноль, NaN и отрицательные порции',()=>{for(const n of [0,-1,NaN,Infinity])expect(()=>scaleRecipe(r,n)).toThrow();});
+ it('не принимает повреждённые импортированные данные',()=>{expect(stateSchema.safeParse({...initialState(),profile:{...initialState().profile,kcal:-1}}).success).toBe(false);expect(recipeSchema.safeParse({...r,yield:0}).success).toBe(false);});
+});
+describe('Меню, запасы и рекомендации',()=>{
+ it('объединяет одинаковые продукты и вычитает запасы один раз',()=>{const list=shoppingFor([meal(r.id,2),meal(r.id,2)],[r],[{id:'stock',name:'Куриное филе',amount:100,unit:'г',expires:''}]);expect(list.find(x=>x.name==='Куриное филе')?.amount).toBe(580);expect(list.some(x=>x.name==='Вода')).toBe(false);});
+ it('не вычитает несовместимые единицы и просроченные запасы',()=>{for(const stock of [{unit:'шт' as const,expires:''},{unit:'г' as const,expires:'2000-01-01'}])expect(shoppingFor([meal(r.id,2)],[r],[{id:'x',name:'Куриное филе',amount:100,...stock}]).find(x=>x.name==='Куриное филе')?.amount).toBe(340);});
+ it('не создаёт отрицательные покупки при избытке запасов',()=>{expect(shoppingFor([meal(r.id,2)],[r],[{id:'x',name:'Куриное филе',amount:9999,unit:'г',expires:''}]).some(x=>x.name==='Куриное филе')).toBe(false);});
+ it('раздельно суммирует план и съеденное',()=>{const state=initialState();state.plan=[meal()];expect(sumMeals(state.consumed,catalog).kcal).toBe(0);expect(sumMeals(state.plan,catalog).kcal).toBe(portion(r).kcal);});
+ it('соблюдает аллергены, нелюбимые продукты, технику и время',()=>{const p=initialState().profile;expect(eligible(r,{...p,allergens:'Глютен'})).toBe(false);expect(eligible(r,{...p,dislikes:'Куриное'})).toBe(false);expect(eligible(r,{...p,equipment:[]})).toBe(false);expect(eligible(r,{...p,maxMinutes:1})).toBe(false);});
+ it('выделяет избранное и исключает отрицательную обратную связь',()=>{const s=initialState();s.feedback[r.id]={rating:10,reaction:'like',favorite:true,cooked:false,reasons:['Вкус'],notes:''};const score=recommend(s).find(x=>x.recipe.id===r.id)!.score;expect(score).toBeGreaterThan(recommend(initialState()).find(x=>x.recipe.id===r.id)!.score);s.feedback[r.id].reaction='dislike';expect(recommend(s).some(x=>x.recipe.id===r.id)).toBe(false);});
+ it('создаёт заданное число порций, разнообразие и предупреждение о неполном рационе',()=>{const s=initialState();const days=Array.from({length:7},(_,i)=>`2026-11-0${i+2}`);const result=generateWeek(s,days);expect(result.meals.reduce((sum,m)=>sum+m.servings,0)).toBe(12);expect(new Set(result.meals.map(m=>m.recipeId)).size).toBeGreaterThan(3);expect(result.meals.every(m=>days.includes(m.date))).toBe(true);expect(result.warnings.length).toBeGreaterThan(0);});
+ it('низкая оценка снижает приоритет',()=>{const s=initialState();const before=recommend(s).find(x=>x.recipe.id===r.id)!.score;s.feedback[r.id]={rating:1,reaction:'',favorite:false,cooked:false,reasons:['Вкус'],notes:''};expect(recommend(s).find(x=>x.recipe.id===r.id)!.score).toBeLessThan(before);});
+ it('объясняет невозможность подобрать меню',()=>{const s=initialState();s.profile.maxMinutes=1;expect(generateWeek(s,['2026-11-02']).meals).toHaveLength(0);});
+ it('сохранённая правка переопределяет каталог; удаление не дублирует запись',()=>{const s=initialState();s.recipes=[{...r,name:'Моя версия'}];expect(allRecipes(s).find(x=>x.id===r.id)?.name).toBe('Моя версия');expect(allRecipes(s)).toHaveLength(20);s.hidden=[r.id];expect(allRecipes(s)).toHaveLength(19);});
+});
