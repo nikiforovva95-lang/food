@@ -49,7 +49,7 @@ test("каталог, обратная связь, порции, план, по�
     .getByRole("button", { name: "Собрать покупки", exact: true })
     .click();
   await nav(page, "Список покупок");
-  await expect(page.getByText("Куриное филе", { exact: true })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Куриное филе", exact: true })).toBeVisible();
   await page.getByLabel("Куриное филе", { exact: true }).check();
   await expect
     .poll(async () =>
