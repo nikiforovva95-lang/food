@@ -24,6 +24,7 @@ import {
   scaleRecipe,
 } from "@/lib/domain";
 import { recipeSchema } from "@/lib/validation";
+import { RecipeImage } from "./recipe-image";
 export function RecipeDialog({
   recipe,
   state,
@@ -414,12 +415,8 @@ export function RecipeDialog({
         </div>
       ) : (
         <>
-          <div
-            className="detail-photo"
-            style={{
-              backgroundImage: `url("${recipe.image}"), url("/food-bowl.png")`,
-            }}
-          >
+          <div className="detail-photo">
+            <RecipeImage recipe={recipe} />
             <span className="pill">{recipe.category}</span>
           </div>
           <div className="dialog-body">
@@ -513,32 +510,34 @@ export function RecipeDialog({
               линейно. Потери жира неизвестны, в расчёте сохранены все
               ингредиенты.
             </p>
-            {!readOnly && (<div className="actions">
-              <button
-                className="primary"
-                onClick={() => onShop(recipe, servings)}
-              >
-                <ShoppingBasket size={17} />В покупки
-              </button>
-              <button
-                className="secondary"
-                onClick={() => onPlan(recipe, servings)}
-              >
-                <Plus size={17} />В меню
-              </button>
-              {!readOnly && (
+            {!readOnly && (
+              <div className="actions">
                 <button
-                  className="text-btn"
-                  onClick={() => {
-                    setDraft(recipe);
-                    setEditing(true);
-                  }}
+                  className="primary"
+                  onClick={() => onShop(recipe, servings)}
                 >
-                  <Pencil size={16} />
-                  Изменить
+                  <ShoppingBasket size={17} />В покупки
                 </button>
-              )}
-            </div>)}
+                <button
+                  className="secondary"
+                  onClick={() => onPlan(recipe, servings)}
+                >
+                  <Plus size={17} />В меню
+                </button>
+                {!readOnly && (
+                  <button
+                    className="text-btn"
+                    onClick={() => {
+                      setDraft(recipe);
+                      setEditing(true);
+                    }}
+                  >
+                    <Pencil size={16} />
+                    Изменить
+                  </button>
+                )}
+              </div>
+            )}
             <h3>Как приготовить</h3>
             <p className="muted">
               {recipe.equipment} · время ориентировочное. Граммы указаны на

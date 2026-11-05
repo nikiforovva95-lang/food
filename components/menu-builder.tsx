@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -41,6 +41,7 @@ import { cookBatch } from "@/lib/inventory";
 import { draftSchema } from "@/lib/validation";
 import { RecipeDialog } from "./recipe-dialog";
 import { GeneratorPanel } from "./recipe-generator";
+import { RecipeImage } from "./recipe-image";
 type Props = {
   state: FoodState;
   update: (f: (s: FoodState) => FoodState) => void;
@@ -49,6 +50,20 @@ type Props = {
 };
 export function MenuBuilder({ state, update, notify, goShopping }: Props) {
   const d = state.wizard;
+  const stepsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const container = stepsRef.current;
+    const active = container?.querySelector<HTMLElement>(
+      '[aria-current="step"]',
+    );
+    if (container && active)
+      container.scrollTo({
+        left:
+          active.offsetLeft -
+          container.offsetLeft -
+          (container.clientWidth - active.offsetWidth) / 2,
+      });
+  }, [d?.step]);
   const [page, setPage] = useState(0),
     [showHistory, setShowHistory] = useState(false),
     [error, setError] = useState(""),
@@ -177,10 +192,11 @@ export function MenuBuilder({ state, update, notify, goShopping }: Props) {
           ))}
         </div>
       )}
-      <div className="builder-steps">
+      <div className="builder-steps" ref={stepsRef}>
         {["Цели и кухня", ...slots, "Готовое меню"].map((label, i) => (
           <button
             key={label}
+            aria-current={step === i ? "step" : undefined}
             disabled={
               i > 0 && i < 4 && slots.slice(0, i - 1).some((x) => !d.choices[x])
             }
@@ -280,14 +296,7 @@ export function MenuBuilder({ state, update, notify, goShopping }: Props) {
               return (
                 <article className="recipe-card builder-card" key={x.recipe.id}>
                   <div className="card-image">
-                    <img
-                      src={x.recipe.image}
-                      alt={x.recipe.name}
-                      onError={(e) => {
-                        if (!e.currentTarget.src.endsWith("/food-bowl.png"))
-                          e.currentTarget.src = "/food-bowl.png";
-                      }}
-                    />
+                    <RecipeImage recipe={x.recipe} />
                   </div>
                   <div className="card-body">
                     <h3>{x.recipe.name}</h3>

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import "./design.css";
 export const metadata: Metadata = {
   title: "FoodLab — еда в гармонии с вами",
   description:
@@ -13,7 +14,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#397457",
+  themeColor: "#173f33",
 };
 export default function RootLayout({
   children,

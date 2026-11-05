@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import {
   LayoutDashboard,
   Search,
@@ -68,6 +68,7 @@ import { VersionHistory } from "./version-history";
 import { targets, consumeOne, recipeForMeal } from "@/lib/planning";
 import { purchasedToPantry } from "@/lib/inventory";
 import { RecipeDialog } from "./recipe-dialog";
+import { RecipeImage } from "./recipe-image";
 const nav = [
   ["home", "Главная", LayoutDashboard],
   ["discover", "Подобрать рецепт", Search],
@@ -120,6 +121,8 @@ function shortDate(s: string) {
   });
 }
 export default function FoodApp() {
+  const sidebarRef = useRef<HTMLElement>(null);
+  const [narrow, setNarrow] = useState(false);
   const [snapshotRecipe, setSnapshotRecipe] = useState<Recipe | null>(null);
   const [partial, setPartial] = useState<{
     meal: Meal;
@@ -163,11 +166,46 @@ export default function FoodApp() {
     [authBusy, setAuthBusy] = useState(false),
     [equipment, setEquipment] = useState("");
   useEffect(() => {
+    const media = window.matchMedia("(max-width: 700px)");
+    const resize = () => {
+      setNarrow(media.matches);
+      if (!media.matches) setMobile(false);
+    };
+    resize();
+    media.addEventListener("change", resize);
+    return () => media.removeEventListener("change", resize);
+  }, []);
+  useEffect(() => {
     if (!mobile) return;
     const previous = document.body.style.overflow;
+    const previousFocus = document.activeElement as HTMLElement | null;
     document.body.style.overflow = "hidden";
+    const focusable = () =>
+      Array.from(
+        sidebarRef.current?.querySelectorAll<HTMLElement>(
+          'a[href],button:not(:disabled),[tabindex="0"]',
+        ) ?? [],
+      ).filter((el) => el.getClientRects().length > 0);
+    focusable()[0]?.focus();
+    const keydown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobile(false);
+      if (e.key !== "Tab") return;
+      const items = focusable(),
+        first = items[0],
+        last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
+      }
+    };
+    document.addEventListener("keydown", keydown);
     return () => {
       document.body.style.overflow = previous;
+      document.removeEventListener("keydown", keydown);
+      previousFocus?.focus();
     };
   }, [mobile]);
   const recipes = useMemo(() => allRecipes(state), [state]);
@@ -430,15 +468,7 @@ export default function FoodApp() {
             aria-label={`Открыть ${r.name}`}
             className="image-link"
           >
-            <img
-              src={r.image}
-              alt={r.name}
-              loading="lazy"
-              onError={(e) => {
-                if (!e.currentTarget.src.endsWith("/food-bowl.png"))
-                  e.currentTarget.src = "/food-bowl.png";
-              }}
-            />
+            <RecipeImage recipe={r} />
           </button>
           <span className="image-tag">{r.tags[0] ?? r.category}</span>
           <button
@@ -491,7 +521,14 @@ export default function FoodApp() {
   }
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${mobile ? "open" : ""}`}>
+      <a className="skip-link" href="#main-content">
+        К содержимому
+      </a>
+      <aside
+        ref={sidebarRef}
+        inert={narrow && !mobile}
+        className={`sidebar ${mobile ? "open" : ""}`}
+      >
         <a
           className="brand"
           href="#"
@@ -504,7 +541,6 @@ export default function FoodApp() {
             <Leaf size={24} />
           </span>
           Food<span>Lab</span>
-          <span className="brand-dot">®</span>
         </a>
         <p className="brand-caption">Еда, которая подходит вам</p>
         <button
@@ -573,6 +609,7 @@ export default function FoodApp() {
               className="icon-btn mobile-menu"
               onClick={() => setMobile(true)}
               aria-label="Открыть меню"
+              aria-expanded={mobile}
             >
               <Menu />
             </button>
@@ -580,7 +617,8 @@ export default function FoodApp() {
               {releaseChannel === "testing" && (
                 <span className="tag testing-label">ТЕСТОВАЯ</span>
               )}
-              Моё пространство <ChevronRight size={13} />
+              <span className="workspace-label">Моё пространство</span>{" "}
+              <ChevronRight className="workspace-label" size={13} />
               <b>{nav.find((n) => n[0] === page)?.[1]}</b>
             </span>
           </div>
@@ -598,7 +636,7 @@ export default function FoodApp() {
             </button>
           </div>
         </header>
-        <main>
+        <main id="main-content" tabIndex={-1}>
           <div className="page-intro">
             <div>
               <p className="eyebrow">
@@ -689,12 +727,17 @@ export default function FoodApp() {
                         Рецепты под ваши цели. Меню без суеты.
                         <br />И только нужные продукты в корзине.
                       </p>
-                      <button
-                        className="primary"
-                        onClick={() => go("discover")}
-                      >
-                        Подобрать рецепт <ArrowRight size={17} />
-                      </button>
+                      <div className="hero-actions">
+                        <button className="primary" onClick={() => go("plan")}>
+                          Составить меню <ArrowRight size={17} />
+                        </button>
+                        <button
+                          className="hero-secondary"
+                          onClick={() => go("discover")}
+                        >
+                          Подобрать рецепт
+                        </button>
+                      </div>
                       <div className="hero-foot">
                         <span className="mini-dot" />С учётом ваших вкусов и
                         техники
@@ -715,6 +758,46 @@ export default function FoodApp() {
                         </div>
                       </div>
                     </div>
+                  </section>
+                  <section
+                    className="daily-route"
+                    aria-label="От целей к покупкам"
+                  >
+                    {[
+                      {
+                        target: "profile",
+                        number: "01",
+                        title: "Ваши цели",
+                        text: `${state.profile.kcal} ккал · ${state.profile.protein} г белка`,
+                        Icon: SlidersHorizontal,
+                      },
+                      {
+                        target: "plan",
+                        number: "02",
+                        title: "Меню по шагам",
+                        text: "Завтрак, обед и ужин",
+                        Icon: CalendarDays,
+                      },
+                      {
+                        target: "shopping",
+                        number: "03",
+                        title: "Всё для готовки",
+                        text: "Список с учётом запасов",
+                        Icon: ShoppingBasket,
+                      },
+                    ].map(({ target, number, title, text, Icon }) => (
+                      <button key={target} onClick={() => go(target as Page)}>
+                        <span className="route-icon">
+                          <Icon size={20} />
+                        </span>
+                        <span>
+                          <small>{number} / ВАШ ПЛАН</small>
+                          <b>{title}</b>
+                          <span>{text}</span>
+                        </span>
+                        <ArrowUpRight size={17} />
+                      </button>
+                    ))}
                   </section>
                   <section className="stats-grid">
                     {[
@@ -877,8 +960,8 @@ export default function FoodApp() {
                       eaten.map((m) => (
                         <div className="list-row" key={m.id}>
                           <span>
-                            {everyRecipe.find((r) => r.id === m.recipeId)
-                              ?.name ?? "Удалённый рецепт"}{" "}
+                            {recipeForMeal(m, everyRecipe)?.name ??
+                              "Удалённый рецепт"}{" "}
                             · {m.servings} порц.
                           </span>
                           <button
@@ -1881,6 +1964,32 @@ export default function FoodApp() {
             <span>Сделано для вашей повседневности</span>
           </footer>
         </main>
+        <div
+          className="mobile-tabbar"
+          role="group"
+          aria-label="Быстрые разделы"
+          inert={mobile}
+        >
+          {(
+            [
+              ["home", "Сегодня", LayoutDashboard],
+              ["discover", "Рецепты", Search],
+              ["plan", "Меню", CalendarDays],
+              ["shopping", "Покупки", ShoppingBasket],
+              ["profile", "Профиль", Settings2],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              onClick={() => go(id)}
+              aria-current={page === id ? "page" : undefined}
+              className={page === id ? "active" : ""}
+            >
+              <Icon size={21} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
       </div>
       {toast && (
         <div className="toast" role="status">
@@ -2136,7 +2245,6 @@ export default function FoodApp() {
     </div>
   );
 }
-import { useEffect, useRef } from "react";
 function FormDialog({
   title,
   close,
@@ -2256,14 +2364,9 @@ function MealRow({
   return (
     <div className="meal-row">
       {recipe && (
-        <img
-          src={recipe.image}
-          alt=""
-          onError={(e) => {
-            if (!e.currentTarget.src.endsWith("/food-bowl.png"))
-              e.currentTarget.src = "/food-bowl.png";
-          }}
-        />
+        <div className="meal-thumbnail">
+          <RecipeImage recipe={recipe} />
+        </div>
       )}
       <div>
         <small>
